@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+type Set[T comparable] map[T]struct{}
+
 func CloseWithLog(file *os.File) {
 	err := file.Close()
 	if err != nil {
