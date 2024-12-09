@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+const debug = false
 const size = 130
 
 type Direction uint8
@@ -45,7 +46,9 @@ func main() {
 	for maze.move() {
 	}
 
-	maze.Print()
+	if debug {
+		maze.Print()
+	}
 	fmt.Printf("Visited: %d\n", maze.visited)
 }
 
@@ -109,7 +112,9 @@ func (maze *Maze) move() bool {
 	}
 
 	if next.x >= size || next.y >= size {
-		fmt.Printf("Escaping at %v\n", next)
+		if debug {
+			fmt.Printf("Escaping at %v\n", next)
+		}
 		return false
 	}
 
@@ -119,7 +124,9 @@ func (maze *Maze) move() bool {
 		} else {
 			maze.direction += 1
 		}
-		fmt.Printf("Encountered obstruction at %v, turning to %v\n", next, maze.direction)
+		if debug {
+			fmt.Printf("Encountered obstruction at %v, turning to %v\n", next, maze.direction)
+		}
 		return true
 	}
 

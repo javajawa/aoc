@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+const debug = false
 const size = 130
 
 type Direction uint8
@@ -76,7 +77,9 @@ func main() {
 			testMaze.area[i][j] = Obstruction
 			if testMaze.checkLoop() {
 				possibleLoop++
-				//fmt.Printf("Maze contains loop with extra obstruction %v\n", Point{x: j, y: i})
+				if debug {
+					fmt.Printf("Maze contains loop with extra obstruction %v\n", Point{x: j, y: i})
+				}
 			}
 		}
 	}
@@ -143,12 +146,16 @@ func (maze *Maze) checkLoop() bool {
 		}
 
 		if next.x >= size || next.y >= size {
-			//fmt.Printf("Escaping at %v\n", next)
+			if debug {
+				fmt.Printf("Escaping at %v\n", next)
+			}
 			return false
 		}
 
 		if maze.area[next.y][next.x] != Obstruction {
-			//fmt.Printf("Moving %v to %v\n", maze.direction, next)
+			if debug {
+				fmt.Printf("Moving %v to %v\n", maze.direction, next)
+			}
 			maze.guard = next
 			maze.area[next.y][next.x] = Visited
 			continue
@@ -161,7 +168,9 @@ func (maze *Maze) checkLoop() bool {
 		}
 
 		if slices.Contains(maze.obstructions, marker) {
-			//fmt.Println("Loop found")
+			if debug {
+				fmt.Println("Loop found")
+			}
 			return true
 		}
 
@@ -172,7 +181,9 @@ func (maze *Maze) checkLoop() bool {
 		} else {
 			maze.direction += 1
 		}
-		//fmt.Printf("Encountered obstruction at %v, turning to %v\n", next, maze.direction)
+		if debug {
+			fmt.Printf("Encountered obstruction at %v, turning to %v\n", next, maze.direction)
+		}
 	}
 }
 

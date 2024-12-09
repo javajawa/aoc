@@ -1,2 +1,4 @@
 input-*.txt
+/all.sh
 /input.sh
+/day*
