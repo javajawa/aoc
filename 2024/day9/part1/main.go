@@ -59,7 +59,7 @@ func main() {
 	}
 
 	fmt.Printf("\nChecksum: %d\n", checksum)
-	fmt.Printf("Final locations: write=%d, reader=%d\n", currentWriteIndex, currentReadIndex)
+	fmt.Printf("Final locations: write=%d, reader=%d, block=%d\n", currentWriteIndex, currentReadIndex, currentDiskBlock)
 }
 
 func updateChecksum(checksum *uint64, currentBlock *uint64, fileId uint64, blocks byte) {
