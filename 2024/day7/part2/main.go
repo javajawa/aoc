@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"math"
-	"math/bits"
 	"os"
 	"strconv"
 	"strings"
@@ -16,17 +14,7 @@ import (
 type request struct {
 	target   uint64
 	operands []uint64
-	length   uint16
 }
-
-type Operation uint8
-
-const (
-	add Operation = iota
-	mul Operation = iota
-	con Operation = iota
-	_   Operation = iota
-)
 
 func main() {
 	defer utils.TimeTrack(time.Now(), "main")
@@ -35,91 +23,117 @@ func main() {
 
 	defer utils.TimeTrack(time.Now(), "process")
 
-	const bitsPerOperation = 2
-	const debug = false
-
 	validOptions := uint64(0)
-	variationsConsidered := uint64(0)
-	variationsPossible := uint64(0)
 
-nextNumber:
-	for _, row := range data {
-		totalPermuatations := uint64(1) << ((bitsPerOperation * row.length) - 1)
-		variationsPossible += totalPermuatations
-	nextPermutation:
-		for permutation := uint64(0); permutation < totalPermuatations; permutation++ {
-			variationsConsidered++
-			rowAccumulator := row.operands[0]
-			// We flip the order so that a known sequence e.g. 010101xxxxxx
-			// in the permutations is processed as xxxxxx010101 by the binary processing logic.
-			// This means that if we exceed the target value with the first set of operations,
-			// we can easily prune all operations that start with that sequence by skipping the
-			// rest of that block.
-			runPermutation := permutation
-			runPermutation = bits.Reverse64(permutation) >> (65 - (bitsPerOperation * row.length))
+	// Tracking information
+	potentialTrees := 0 // How many operations could have happened
+	trees := 0          // How many operations we evaluated
+	maxValues := 0      // How many values we were tracking at once
+	maxRowNum := 0      // The row on which the max values was reached
 
-			if debug {
-				fmt.Printf("%v variation %08b (%08b)\n", row, permutation, runPermutation)
-				fmt.Printf("  x = %d\n", rowAccumulator)
+	for rowNum, row := range data {
+		shiftFactors := make([]uint64, len(row.operands))
+		potentialTrees += 3 * IntPow(3, len(row.operands)-1) / 2
+
+		// Calculate the value for concatenating the values together.
+		// This is always the largest operator:
+		//   x || 9 = 10 * x + 9
+		//   x * 9 < 10x + 9
+		//   x + 9 < 10x + 9
+		conAcc := uint64(0)
+		for i, operand := range row.operands {
+			// Calculate the multiplication factor for the || operator
+			shiftFactors[i] = 1
+			for buf := operand; buf > 0; buf /= 10 {
+				shiftFactors[i] *= 10
 			}
 
-			for field := uint16(1); field < row.length; field++ {
-				op := Operation(runPermutation & 0b11)
-				if op == add {
-					if debug {
-						fmt.Printf("  x = %d + %d = %d\n", rowAccumulator, row.operands[field], rowAccumulator+row.operands[field])
-					}
-					rowAccumulator = rowAccumulator + row.operands[field]
-				} else if op == mul {
-					if debug {
-						fmt.Printf("  x = %d * %d = %d\n", rowAccumulator, row.operands[field], rowAccumulator*row.operands[field])
-					}
-					rowAccumulator = rowAccumulator * row.operands[field]
-				} else if op == con {
-					if debug {
-						fmt.Printf("  x = %d || %d = ", rowAccumulator, row.operands[field])
-					}
-					for buf := row.operands[field]; buf > 0; buf /= 10 {
-						rowAccumulator *= 10
-					}
-					rowAccumulator += row.operands[field]
-					if debug {
-						fmt.Printf("%d\n", rowAccumulator)
-					}
-				} else {
-					rowAccumulator = math.MaxInt64
-				}
+			conAcc = conAcc*shiftFactors[i] + operand
+		}
 
-				if rowAccumulator > row.target {
-					// We're reading the binary string right -> left
-					// But it is the inversion of the outer loop
-					// So we are effectively reading `permutation` left -> right
-					fieldInOriginalPermutation := row.length - field - 1
+		// Hey, if we get exactly the answer from concatenation, that's a free result
+		//  (My data set includes 0 of these)
+		if conAcc == row.target {
+			validOptions += row.target
+			continue
+		}
 
-					// After `field` fields, we are out of bounds. Any combination of later fields
-					// will also terminate here. So we can prune all those branches.
-					// We achieve this by setting all the remaining bits high.
-					permutation = permutation | ((1 << (bitsPerOperation * fieldInOriginalPermutation)) - 1)
+		// And if we didn't make it to the target, that's a free negative result
+		if conAcc < row.target {
+			continue
+		}
 
-					// When iterating the loop, one more will be added to `permutation`, taking us
-					// out of this branch
-					continue nextPermutation
-				}
-				runPermutation = runPermutation >> bitsPerOperation
+		minimums := make([]uint64, len(row.operands)-1)
+		maximums := make([]uint64, len(row.operands)-1)
+		minTarget := row.target
+		maxTarget := row.target
+
+		// Calculate the minimum and maximum values at each
+		// position that could in theory still reach an answer
+		minimums[len(row.operands)-2] = minTarget
+		maximums[len(row.operands)-2] = maxTarget
+		for i := len(row.operands) - 1; i > 1; i-- {
+			minTarget /= shiftFactors[i]
+			minimums[i-2] = minTarget
+
+			// Special case: x*1 < x+1
+			// In the event of a 1, we keep the same maximum as the next position to the right.
+			if row.operands[i] > 1 {
+				maxTarget -= row.operands[i]
+			}
+			maximums[i-2] = maxTarget
+		}
+
+		tracked := []uint64{row.operands[0]}
+
+		for i, operand := range row.operands[1:] {
+			toCheck := 3 * len(tracked)
+
+			// Keep track of which row had the most allocations.
+			trees += toCheck
+			if toCheck > maxValues {
+				maxValues = toCheck
+				maxRowNum = rowNum
 			}
 
-			if rowAccumulator == row.target {
-				if debug {
-					fmt.Printf("Valid!\n")
+			// Pre-allocate the slice for the values we find at this step
+			out := make([]uint64, toCheck)
+			accepted := 0
+
+			// Get the minimum / maximum allocations
+			minimum := minimums[i]
+			maximum := maximums[i]
+
+			for _, previous := range tracked {
+				next := previous + operand
+				if minimum <= next && next <= maximum {
+					out[accepted] = next
+					accepted++
 				}
-				validOptions += row.target
-				continue nextNumber
+
+				next = previous * operand
+				if minimum <= next && next <= maximum {
+					out[accepted] = next
+					accepted++
+				}
+
+				next = previous*shiftFactors[i+1] + operand
+				if minimum <= next && next <= maximum {
+					out[accepted] = next
+					accepted++
+				}
 			}
+
+			tracked = out[0:accepted]
+		}
+
+		if len(tracked) > 0 {
+			validOptions += row.target
 		}
 	}
 
 	fmt.Printf("Result: %d\n", validOptions)
-	fmt.Printf("Considered %d variations (%.1f%% of possible variations)\n", variationsConsidered, 100*(float64(variationsConsidered)/float64(variationsPossible)))
+	fmt.Printf("Evaluated %.1f%% of %d possible operations, with row %d having %d operations evaluated in one step\n", float64(trees)/float64(potentialTrees)*100, potentialTrees, maxRowNum, maxValues)
 }
 
 func loadData() []request {
@@ -147,11 +161,7 @@ func loadData() []request {
 		}
 
 		fields := strings.Fields(buffer)
-		length := uint16(len(fields) - 1)
-
-		if length > 32 {
-			panic("invalid input -- too many operands")
-		}
+		length := len(fields) - 1
 
 		target, err := strconv.ParseUint(fields[0][:len(fields[0])-1], 10, 64)
 		if err != nil {
@@ -165,9 +175,24 @@ func loadData() []request {
 				panic(err)
 			}
 		}
-		//fmt.Println(requests[i])
 
-		requests = append(requests, request{target: target, operands: operands, length: length})
+		requests = append(requests, request{target: target, operands: operands})
 	}
 	return requests
+}
+
+func IntPow(base, exp int) int {
+	result := 1
+	for {
+		if exp&1 == 1 {
+			result *= base
+		}
+		exp >>= 1
+		if exp == 0 {
+			break
+		}
+		base *= base
+	}
+
+	return result
 }

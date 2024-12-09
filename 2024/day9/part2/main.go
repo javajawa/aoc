@@ -12,6 +12,83 @@ import (
 
 const debug = false
 
+type fileSpec struct {
+	fileId uint64
+	size   int
+}
+
+type priorityQueue struct {
+	sourceBuffer []int
+	readHead     uint64
+	queues       [9][]fileSpec
+}
+
+func newPriorityQueue(buffer []int) *priorityQueue {
+	var queues [9][]fileSpec
+
+	for i, _ := range queues {
+		queues[i] = make([]fileSpec, 0)
+	}
+
+	return &priorityQueue{
+		sourceBuffer: buffer,
+		readHead:     uint64(len(buffer)-1) & ^uint64(1),
+		queues:       queues,
+	}
+}
+
+func (queues *priorityQueue) get(spaceSize int, after uint64) fileSpec {
+	matched := fileSpec{
+		fileId: 0,
+		size:   0,
+	}
+
+	// Find the highest ID file that fits in the space
+	for i := 0; i < spaceSize; i++ {
+		// Skip empty queues
+		if len(queues.queues[i]) == 0 {
+			continue
+		}
+
+		potentialFileId := queues.queues[i][0].fileId
+		// If the first item in a queue is from before our current position,
+		// we can drop that entire queue.
+		if potentialFileId < (after >> 1) {
+			queues.queues[i] = []fileSpec{}
+		} else if potentialFileId > matched.fileId {
+			// Otherwise, keep it if it's file from further on in the disk
+			matched = fileSpec{fileId: potentialFileId, size: i + 1}
+		}
+	}
+
+	// If the matched file is from further on in the disk than we have de-fragged...
+	if matched.fileId > (after >> 1) {
+		// Mark the file as moved
+		queues.sourceBuffer[matched.fileId<<1] = -matched.size
+		// Remove it from the queue
+		queues.queues[matched.size-1] = queues.queues[matched.size-1][1:]
+		// And give it back to the moving function
+		return matched
+	}
+
+	// Otherwise, scan the filesystem from right to left, filling queues
+	// until we either reach the left-to-right process or a file we can move.
+	for ; queues.readHead > after; queues.readHead -= 2 {
+		size := queues.sourceBuffer[queues.readHead]
+		matched = fileSpec{fileId: queues.readHead >> 1, size: size}
+
+		if size <= spaceSize {
+			queues.sourceBuffer[queues.readHead] = -queues.sourceBuffer[queues.readHead]
+			queues.readHead -= 2
+			return matched
+		}
+
+		queues.queues[size-1] = append(queues.queues[size-1], matched)
+	}
+
+	return fileSpec{fileId: 0}
+}
+
 func main() {
 	defer utils.TimeTrack(time.Now(), "main")
 
@@ -21,18 +98,16 @@ func main() {
 
 	checksum := uint64(0)
 
-	var currentWriteIndex, currentReadIndex uint64
-
-	initialReadIndex := uint64(len(buffer)-1) & ^uint64(1)
-	currentReadIndex = initialReadIndex
+	queue := newPriorityQueue(buffer)
+	initialReadIndex := queue.readHead
 
 	// Counter for the number of blocks we have put back on the disk
 	currentDiskBlock := uint64(0)
 
-	for currentWriteIndex = 0; currentWriteIndex <= initialReadIndex; currentWriteIndex++ {
+	for scanPosition := uint64(0); scanPosition <= initialReadIndex; scanPosition++ {
 		// Even entries represent a file
-		if currentWriteIndex%2 == 0 {
-			fileLength := buffer[currentWriteIndex]
+		if scanPosition%2 == 0 {
+			fileLength := buffer[scanPosition]
 
 			// Skip files that have been moved in the defragmentation process
 			if fileLength < 0 {
@@ -43,25 +118,22 @@ func main() {
 				continue
 			}
 
-			updateChecksum(&checksum, &currentDiskBlock, currentWriteIndex>>1, fileLength)
+			// Write out the file in the same position as it originally was
+			updateChecksum(&checksum, &currentDiskBlock, fileSpec{fileId: scanPosition >> 1, size: fileLength})
 		} else {
-			spaceLength := buffer[currentWriteIndex]
-			currentReadIndex = initialReadIndex
+			spaceLength := buffer[scanPosition]
 
-			for ; spaceLength > 0 && currentReadIndex > currentWriteIndex; currentReadIndex -= 2 {
-				fileLength := buffer[currentReadIndex]
+			for spaceLength > 0 {
+				fileToMove := queue.get(spaceLength, scanPosition)
 
-				// Do not move files that have already been moved, or won't fit in this space.
-				if fileLength < 0 || fileLength > spaceLength {
-					continue
+				if fileToMove.fileId == 0 {
+					break
 				}
 
 				// Write out the relocated file
-				updateChecksum(&checksum, &currentDiskBlock, currentReadIndex>>1, fileLength)
-
-				// Update our remaining free space, and mark the file as moved by making the space negative
-				spaceLength -= fileLength
-				buffer[currentReadIndex] = -fileLength
+				updateChecksum(&checksum, &currentDiskBlock, fileToMove)
+				// Update our remaining free space
+				spaceLength -= fileToMove.size
 			}
 
 			if debug {
@@ -72,10 +144,10 @@ func main() {
 	}
 
 	fmt.Printf("\nChecksum: %d\n", checksum)
-	fmt.Printf("Final locations: write=%d, reader=%d, block=%d\n", currentWriteIndex, currentReadIndex, currentDiskBlock)
+	fmt.Printf("Final locations: block=%d\n", currentDiskBlock)
 }
 
-func updateChecksum(checksum *uint64, currentBlock *uint64, fileId uint64, blocks int) {
+func updateChecksum(checksum *uint64, currentBlock *uint64, file fileSpec) {
 	// Sum of ints is n(n+1)/2. We want end-start of that.
 	// [(start+len)(start+len+1) - (start)(start + 1)]/2
 	// [(s^2 + sl + s + l^2 + sl + l) - (s^2 + s)]/2
@@ -85,11 +157,11 @@ func updateChecksum(checksum *uint64, currentBlock *uint64, fileId uint64, block
 	//
 	// But, something-something (start+len-1) so we end up with an off by two error.
 	if debug {
-		fmt.Printf("%s", strings.Repeat(strconv.FormatUint(fileId%10, 10), blocks))
+		fmt.Printf("%s", strings.Repeat(strconv.FormatUint(file.fileId%10, 10), file.size))
 	}
 
-	blocksUint := uint64(blocks)
-	*checksum += fileId * blocksUint * ((*currentBlock << 1) + blocksUint - 1) / 2
+	blocksUint := uint64(file.size)
+	*checksum += file.fileId * blocksUint * ((*currentBlock << 1) + blocksUint - 1) / 2
 	*currentBlock += blocksUint
 }
 
