@@ -11,7 +11,7 @@ func main() {
 	defer utils.TimeTrack(time.Now(), "main")
 
 	knownSequence := day11.ResultCache{}
-	data := day11.NewRequest(25, day11.LoadData())
+	data := day11.NewRequest(75, day11.LoadData())
 	fmt.Printf("Result: %d\n", data.Process(&knownSequence))
 
 	day11.CacheStats(knownSequence)
