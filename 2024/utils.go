@@ -4,6 +4,7 @@ import (
 	"image"
 	"log"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -32,6 +33,15 @@ func (m *Set[T]) Union(other Set[T]) {
 	for v := range other {
 		(*m)[v] = struct{}{}
 	}
+}
+
+func (m *Set[T]) TryAdd(v T) bool {
+	_, ok := (*m)[v]
+	if ok {
+		return false
+	}
+	(*m)[v] = struct{}{}
+	return true
 }
 
 func (m *Set[T]) AddAll(v []T) {
@@ -74,4 +84,14 @@ func (grid *Grid[T]) At(x int, y int) *T {
 		return nil
 	}
 	return &grid.Data[y*grid.Width+x]
+}
+
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Printf("MemStats: Current=%dMiB System=%dMiB Total=%dMiB", bToMb(m.Alloc), bToMb(m.Sys), bToMb(m.TotalAlloc))
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }
