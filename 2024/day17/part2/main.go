@@ -79,18 +79,41 @@ func (mem *bitMemory) str() string {
 }
 
 func main() {
+	const expectedOutput = 0o33
+
 	if debug {
 		explain()
 	}
 
 	defer utils.TimeTrack(time.Now(), "main")
 
-	target := []int{2, 4}
-	//target := []int{7}
+	target := []int{3, 4}
 	memory := bitMemory{maxBits: 3 * len(target)}
 
 	result := explore(memory, target, 0)
+
+	if test(result) != expectedOutput {
+		panic("invalid result")
+	}
+
 	fmt.Println(result)
+}
+
+func test(a uint64) uint64 {
+	b := uint64(0)
+	c := uint64(0)
+	out := uint64(0)
+
+	for a > 0 {
+		b = a & 7
+		b = b ^ 5
+		c = a >> b
+		a = a >> 3
+		out = out << 3
+		out += (b ^ c ^ 6) & 7
+	}
+
+	return out
 }
 
 func explore(initialMemory bitMemory, targets []int, outputIndex int) uint64 {

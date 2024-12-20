@@ -262,17 +262,19 @@ func (grid *dijkstraGrid) findRoute() int {
 
 	point := image.Point{X: 0, Y: 0}
 
-	for point.Y = 0; point.Y < grid.Height; point.Y++ {
-		for point.X = 0; point.X < grid.Width; point.X++ {
-			if grid.isWall(point) {
-				fmt.Printf("#")
-			} else if seats[point] {
-				fmt.Printf("O")
-			} else {
-				fmt.Printf(".")
+	if debug {
+		for point.Y = 0; point.Y < grid.Height; point.Y++ {
+			for point.X = 0; point.X < grid.Width; point.X++ {
+				if grid.isWall(point) {
+					fmt.Printf("#")
+				} else if seats[point] {
+					fmt.Printf("O")
+				} else {
+					fmt.Printf(".")
+				}
 			}
+			fmt.Printf("\n")
 		}
-		fmt.Printf("\n")
 	}
 
 	return len(seats)
