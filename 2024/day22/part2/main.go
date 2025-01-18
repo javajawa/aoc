@@ -15,7 +15,7 @@ func main() {
 
 	secrets := loadData()
 
-	basket := make(map[uint]int)
+	basket := make(map[uint32]int)
 
 	for _, secret := range secrets {
 		for key, value := range mapSecretDelta(secret, 2000) {
@@ -23,7 +23,7 @@ func main() {
 		}
 	}
 
-	keys := make([]uint, 0, len(basket))
+	keys := make([]uint32, 0, len(basket))
 
 	for key := range basket {
 		keys = append(keys, key)
@@ -46,14 +46,14 @@ const negativeDiffFlag = 1 << (bitsPerDiff - 1)
 const diffMask = negativeDiffFlag - 1
 const fullDiffMask = 1<<(bitsPerDiff*diffHistory) - 1
 
-func binRep(x int) uint {
-	if x > 0 {
-		return uint(x & diffMask)
+func binRep(x int) uint32 {
+	if x >= 0 {
+		return uint32(x & diffMask)
 	}
-	return uint((-x)&diffMask) | negativeDiffFlag
+	return uint32((-x)&diffMask) | negativeDiffFlag
 }
 
-func sequenceDecode(val uint) []int {
+func sequenceDecode(val uint32) []int {
 	numbers := make([]int, 4)
 
 	for i := 3; i >= 0; i-- {
@@ -66,25 +66,23 @@ func sequenceDecode(val uint) []int {
 	return numbers
 }
 
-func mapSecretDelta(secret uint64, rounds int) map[uint]int {
+func mapSecretDelta(secret uint64, rounds int) map[uint32]int {
 	var newDigit int
-	currentSequence := uint(fullDiffMask)
+	currentSequence := uint32(fullDiffMask)
 	previousDigit := int(secret % 10)
-	memory := make(map[uint]int)
+	memory := make(map[uint32]int)
 
 	for i := 0; i < rounds; i++ {
 		secret ^= secret << 6
 		secret &= 0xFFFFFF
 		secret ^= secret >> 5
-		secret &= 0xFFFFFF
 		secret ^= secret << 11
 		secret &= 0xFFFFFF
 
 		newDigit = int(secret % 10)
-		diff := newDigit - previousDigit
 
 		currentSequence <<= bitsPerDiff
-		currentSequence += binRep(diff)
+		currentSequence += binRep(newDigit - previousDigit)
 		currentSequence &= fullDiffMask
 
 		_, exists := memory[currentSequence]
